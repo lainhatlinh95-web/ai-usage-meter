@@ -1,0 +1,5 @@
+AiUsageOverlay.exe
+*.pdb
+*.user
+bin/
+obj/
