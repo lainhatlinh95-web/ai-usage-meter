@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -74,8 +75,9 @@ internal sealed class Options
 internal sealed class OverlayForm : Form
 {
     private readonly Options _options;
-    private readonly Label _label;
     private readonly System.Windows.Forms.Timer _timer;
+    private OverlayStats _stats;
+    private string _error;
     private bool _dragging;
     private Point _dragStart;
 
@@ -87,41 +89,29 @@ internal sealed class OverlayForm : Form
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
         ShowInTaskbar = false;
-        BackColor = Color.FromArgb(10, 10, 10);
-        Opacity = 0.86;
-        Width = 310;
-        Height = 126;
+        BackColor = Color.Black;
+        Opacity = 0.68;
+        Width = 760;
+        Height = 150;
         Left = Screen.PrimaryScreen.WorkingArea.Right - Width - 18;
         Top = Screen.PrimaryScreen.WorkingArea.Top + 18;
-        Font = new Font("Consolas", 9.5f, FontStyle.Regular);
-
-        _label = new Label
-        {
-            Dock = DockStyle.Fill,
-            ForeColor = Color.FromArgb(225, 245, 225),
-            BackColor = Color.Transparent,
-            Padding = new Padding(10, 8, 10, 8),
-            TextAlign = ContentAlignment.MiddleLeft
-        };
-        Controls.Add(_label);
+        Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
+        DoubleBuffered = true;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
 
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Refresh", null, delegate { UpdateText(); });
+        menu.Items.Add("Refresh", null, delegate { UpdateStats(); });
         menu.Items.Add("Close", null, delegate { Close(); });
         ContextMenuStrip = menu;
-        _label.ContextMenuStrip = menu;
 
         MouseDown += StartDrag;
         MouseMove += MoveDrag;
         MouseUp += StopDrag;
-        _label.MouseDown += StartDrag;
-        _label.MouseMove += MoveDrag;
-        _label.MouseUp += StopDrag;
 
         _timer = new System.Windows.Forms.Timer { Interval = Math.Max(2, _options.RefreshSeconds) * 1000 };
-        _timer.Tick += delegate { UpdateText(); };
+        _timer.Tick += delegate { UpdateStats(); };
         _timer.Start();
-        UpdateText();
+        UpdateStats();
     }
 
     private void StartDrag(object sender, MouseEventArgs e)
@@ -143,32 +133,129 @@ internal sealed class OverlayForm : Form
         _dragging = false;
     }
 
-    private void UpdateText()
+    private void UpdateStats()
     {
         try
         {
-            var stats = UsageReader.Read(_options);
-            var codexShort = stats.Codex.ShortUsedPercent.HasValue
-                ? Math.Max(0, 100 - stats.Codex.ShortUsedPercent.Value).ToString("N0", CultureInfo.InvariantCulture) + "%"
-                : "--";
-            var codexWeek = stats.Codex.WeekUsedPercent.HasValue
-                ? Math.Max(0, 100 - stats.Codex.WeekUsedPercent.Value).ToString("N0", CultureInfo.InvariantCulture) + "%"
-                : "--";
-
-            _label.Text = string.Join(Environment.NewLine, new[]
-            {
-                "AI USAGE",
-                string.Format("CODEX  {0,2} {1,7}  7d {2,7}", FormatWindow(stats.Codex.ShortWindowMinutes), FormatCompact(stats.Codex.HourTokens), FormatCompact(stats.Codex.WeekTokens)),
-                string.Format("       5h left {0,4} reset {1}", codexShort, FormatReset(stats.Codex.ShortReset)),
-                string.Format("       7d left {0,4} reset {1}", codexWeek, FormatReset(stats.Codex.WeekReset)),
-                string.Format("CLAUDE 1h {0,7}  7d {1,7}", FormatCompact(stats.Claude.HourTokens), FormatCompact(stats.Claude.WeekTokens)),
-                string.Format("poll {0}s {1} {2}", _options.RefreshSeconds, stats.Codex.Source, stats.SampledAt.ToString("HH:mm:ss", CultureInfo.InvariantCulture))
-            });
+            _stats = UsageReader.Read(_options);
+            _error = null;
         }
         catch (Exception ex)
         {
-            _label.Text = "AI USAGE" + Environment.NewLine + "read error: " + ex.Message;
+            _error = ex.Message;
         }
+        Invalidate();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+        if (!string.IsNullOrEmpty(_error))
+        {
+            using (var brush = new SolidBrush(Color.FromArgb(235, 255, 255, 255)))
+            using (var font = new Font("Segoe UI", 11f, FontStyle.Regular))
+            {
+                g.DrawString("AI Usage: " + _error, font, brush, 18, 18);
+            }
+            return;
+        }
+
+        if (_stats == null)
+        {
+            using (var brush = new SolidBrush(Color.FromArgb(235, 255, 255, 255)))
+            using (var font = new Font("Segoe UI", 11f, FontStyle.Regular))
+            {
+                g.DrawString("AI Usage: loading", font, brush, 18, 18);
+            }
+            return;
+        }
+
+        var gap = 14;
+        var cardWidth = (ClientSize.Width - 28 - gap) / 2;
+        var cardHeight = ClientSize.Height - 24;
+        var left = new RectangleF(12, 12, cardWidth, cardHeight);
+        var right = new RectangleF(12 + cardWidth + gap, 12, cardWidth, cardHeight);
+
+        var shortLeft = RemainingPercent(_stats.Codex.ShortUsedPercent);
+        var weekLeft = RemainingPercent(_stats.Codex.WeekUsedPercent);
+        DrawQuotaCard(g, left, "5 hour usage limit", shortLeft, _stats.Codex.ShortReset);
+        DrawQuotaCard(g, right, "Weekly usage limit", weekLeft, _stats.Codex.WeekReset);
+    }
+
+    private static void DrawQuotaCard(Graphics g, RectangleF rect, string title, double? remainingPercent, DateTime? reset)
+    {
+        using (var path = RoundedRect(rect, 18f))
+        using (var fill = new SolidBrush(Color.FromArgb(220, 30, 30, 30)))
+        using (var border = new Pen(Color.FromArgb(80, 255, 255, 255), 1f))
+        {
+            g.FillPath(fill, path);
+            g.DrawPath(border, path);
+        }
+
+        var x = rect.Left + 22;
+        var y = rect.Top + 18;
+        using (var titleFont = new Font("Segoe UI", 10.5f, FontStyle.Bold))
+        using (var valueFont = new Font("Segoe UI", 18f, FontStyle.Bold))
+        using (var smallFont = new Font("Segoe UI", 9.5f, FontStyle.Regular))
+        using (var muted = new SolidBrush(Color.FromArgb(205, 220, 226, 235)))
+        using (var white = new SolidBrush(Color.White))
+        {
+            g.DrawString(title, titleFont, muted, x, y);
+            var value = remainingPercent.HasValue
+                ? remainingPercent.Value.ToString("N0", CultureInfo.InvariantCulture) + "% left"
+                : "-- left";
+            g.DrawString(value, valueFont, white, x, y + 29);
+
+            var barRect = new RectangleF(x, y + 76, rect.Width - 44, 11);
+            DrawProgressBar(g, barRect, remainingPercent);
+            g.DrawString("reset: " + FormatReset(reset), smallFont, muted, x, y + 101);
+        }
+    }
+
+    private static void DrawProgressBar(Graphics g, RectangleF rect, double? remainingPercent)
+    {
+        using (var trackPath = RoundedRect(rect, rect.Height / 2f))
+        using (var track = new SolidBrush(Color.FromArgb(230, 236, 238, 244)))
+        {
+            g.FillPath(track, trackPath);
+        }
+
+        if (!remainingPercent.HasValue) return;
+        var pct = Math.Max(0, Math.Min(100, remainingPercent.Value));
+        if (pct <= 0) return;
+
+        var fillRect = new RectangleF(rect.Left, rect.Top, Math.Max(rect.Height, rect.Width * (float)(pct / 100.0)), rect.Height);
+        var fillColor = pct <= 20
+            ? Color.FromArgb(255, 255, 105, 115)
+            : pct <= 35
+                ? Color.FromArgb(255, 245, 181, 68)
+                : Color.FromArgb(255, 35, 198, 100);
+        using (var fillPath = RoundedRect(fillRect, rect.Height / 2f))
+        using (var fill = new SolidBrush(fillColor))
+        {
+            g.FillPath(fill, fillPath);
+        }
+    }
+
+    private static GraphicsPath RoundedRect(RectangleF rect, float radius)
+    {
+        var diameter = radius * 2f;
+        var path = new GraphicsPath();
+        path.AddArc(rect.Left, rect.Top, diameter, diameter, 180, 90);
+        path.AddArc(rect.Right - diameter, rect.Top, diameter, diameter, 270, 90);
+        path.AddArc(rect.Right - diameter, rect.Bottom - diameter, diameter, diameter, 0, 90);
+        path.AddArc(rect.Left, rect.Bottom - diameter, diameter, diameter, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
+    private static double? RemainingPercent(double? usedPercent)
+    {
+        return usedPercent.HasValue ? Math.Max(0, 100 - usedPercent.Value) : (double?)null;
     }
 
     private static string FormatCompact(long value)
