@@ -190,43 +190,43 @@ internal sealed class OverlayForm : Form
             g.DrawPath(border, path);
         }
 
-        using (var headerFont = new Font("Consolas", 9.5f, FontStyle.Bold))
-        using (var textFont = new Font("Consolas", 9.5f, FontStyle.Regular))
+        using (var headerFont = new Font("Consolas", 9.2f, FontStyle.Bold))
+        using (var textFont = new Font("Consolas", 8.9f, FontStyle.Regular))
         using (var smallFont = new Font("Consolas", 8.3f, FontStyle.Regular))
         using (var header = new SolidBrush(Color.FromArgb(235, 245, 255, 245)))
         using (var text = new SolidBrush(Color.FromArgb(225, 245, 245, 235)))
         using (var muted = new SolidBrush(Color.FromArgb(185, 215, 220, 220)))
         {
-            var y = 8f;
+            var y = 7f;
             g.DrawString("AI USAGE", headerFont, header, 10, y);
-            y += 19;
+            y = 25f;
             g.DrawString(string.Format(
                 "CODEX  {0,2} {1,7}  7d {2,7}",
                 FormatWindow(_stats.Codex.ShortWindowMinutes),
                 FormatCompact(_stats.Codex.HourTokens),
                 FormatCompact(_stats.Codex.WeekTokens)), textFont, text, 10, y);
 
-            y += 19;
+            y = 43f;
             g.DrawString(string.Format(
                 "       5h left {0,4} reset {1}",
                 FormatPercent(shortLeft),
                 FormatReset(_stats.Codex.ShortReset)), textFont, text, 10, y);
-            DrawProgressBar(g, new RectangleF(212, y + 5, 82, 7), shortLeft);
+            DrawProgressBar(g, new RectangleF(10, 59, 290, 4), shortLeft);
 
-            y += 19;
+            y = 64f;
             g.DrawString(string.Format(
                 "       7d left {0,4} reset {1}",
                 FormatPercent(weekLeft),
                 FormatReset(_stats.Codex.WeekReset)), textFont, text, 10, y);
-            DrawProgressBar(g, new RectangleF(212, y + 5, 82, 7), weekLeft);
+            DrawProgressBar(g, new RectangleF(10, 80, 290, 4), weekLeft);
 
-            y += 19;
+            y = 86f;
             g.DrawString(string.Format(
                 "CLAUDE 1h {0,7}  7d {1,7}",
                 FormatCompact(_stats.Claude.HourTokens),
                 FormatCompact(_stats.Claude.WeekTokens)), textFont, text, 10, y);
 
-            y += 18;
+            y = 104f;
             g.DrawString(string.Format(
                 "poll {0}s {1} {2}",
                 _options.RefreshSeconds,
