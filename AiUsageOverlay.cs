@@ -91,8 +91,8 @@ internal sealed class OverlayForm : Form
         ShowInTaskbar = false;
         BackColor = Color.Black;
         Opacity = 0.68;
-        Width = 760;
-        Height = 150;
+        Width = 310;
+        Height = 126;
         Left = Screen.PrimaryScreen.WorkingArea.Right - Width - 18;
         Top = Screen.PrimaryScreen.WorkingArea.Top + 18;
         Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
@@ -174,45 +174,64 @@ internal sealed class OverlayForm : Form
             return;
         }
 
-        var gap = 14;
-        var cardWidth = (ClientSize.Width - 28 - gap) / 2;
-        var cardHeight = ClientSize.Height - 24;
-        var left = new RectangleF(12, 12, cardWidth, cardHeight);
-        var right = new RectangleF(12 + cardWidth + gap, 12, cardWidth, cardHeight);
-
         var shortLeft = RemainingPercent(_stats.Codex.ShortUsedPercent);
         var weekLeft = RemainingPercent(_stats.Codex.WeekUsedPercent);
-        DrawQuotaCard(g, left, "5 hour usage limit", shortLeft, _stats.Codex.ShortReset);
-        DrawQuotaCard(g, right, "Weekly usage limit", weekLeft, _stats.Codex.WeekReset);
+        DrawCompactOverlay(g, shortLeft, weekLeft);
     }
 
-    private static void DrawQuotaCard(Graphics g, RectangleF rect, string title, double? remainingPercent, DateTime? reset)
+    private void DrawCompactOverlay(Graphics g, double? shortLeft, double? weekLeft)
     {
+        var rect = new RectangleF(0.5f, 0.5f, ClientSize.Width - 1, ClientSize.Height - 1);
         using (var path = RoundedRect(rect, 18f))
-        using (var fill = new SolidBrush(Color.FromArgb(220, 30, 30, 30)))
-        using (var border = new Pen(Color.FromArgb(80, 255, 255, 255), 1f))
+        using (var fill = new SolidBrush(Color.FromArgb(215, 16, 16, 16)))
+        using (var border = new Pen(Color.FromArgb(85, 255, 255, 255), 1f))
         {
             g.FillPath(fill, path);
             g.DrawPath(border, path);
         }
 
-        var x = rect.Left + 22;
-        var y = rect.Top + 18;
-        using (var titleFont = new Font("Segoe UI", 10.5f, FontStyle.Bold))
-        using (var valueFont = new Font("Segoe UI", 18f, FontStyle.Bold))
-        using (var smallFont = new Font("Segoe UI", 9.5f, FontStyle.Regular))
-        using (var muted = new SolidBrush(Color.FromArgb(205, 220, 226, 235)))
-        using (var white = new SolidBrush(Color.White))
+        using (var headerFont = new Font("Consolas", 9.5f, FontStyle.Bold))
+        using (var textFont = new Font("Consolas", 9.5f, FontStyle.Regular))
+        using (var smallFont = new Font("Consolas", 8.3f, FontStyle.Regular))
+        using (var header = new SolidBrush(Color.FromArgb(235, 245, 255, 245)))
+        using (var text = new SolidBrush(Color.FromArgb(225, 245, 245, 235)))
+        using (var muted = new SolidBrush(Color.FromArgb(185, 215, 220, 220)))
         {
-            g.DrawString(title, titleFont, muted, x, y);
-            var value = remainingPercent.HasValue
-                ? remainingPercent.Value.ToString("N0", CultureInfo.InvariantCulture) + "% left"
-                : "-- left";
-            g.DrawString(value, valueFont, white, x, y + 29);
+            var y = 8f;
+            g.DrawString("AI USAGE", headerFont, header, 10, y);
+            y += 19;
+            g.DrawString(string.Format(
+                "CODEX  {0,2} {1,7}  7d {2,7}",
+                FormatWindow(_stats.Codex.ShortWindowMinutes),
+                FormatCompact(_stats.Codex.HourTokens),
+                FormatCompact(_stats.Codex.WeekTokens)), textFont, text, 10, y);
 
-            var barRect = new RectangleF(x, y + 76, rect.Width - 44, 11);
-            DrawProgressBar(g, barRect, remainingPercent);
-            g.DrawString("reset: " + FormatReset(reset), smallFont, muted, x, y + 101);
+            y += 19;
+            g.DrawString(string.Format(
+                "       5h left {0,4} reset {1}",
+                FormatPercent(shortLeft),
+                FormatReset(_stats.Codex.ShortReset)), textFont, text, 10, y);
+            DrawProgressBar(g, new RectangleF(212, y + 5, 82, 7), shortLeft);
+
+            y += 19;
+            g.DrawString(string.Format(
+                "       7d left {0,4} reset {1}",
+                FormatPercent(weekLeft),
+                FormatReset(_stats.Codex.WeekReset)), textFont, text, 10, y);
+            DrawProgressBar(g, new RectangleF(212, y + 5, 82, 7), weekLeft);
+
+            y += 19;
+            g.DrawString(string.Format(
+                "CLAUDE 1h {0,7}  7d {1,7}",
+                FormatCompact(_stats.Claude.HourTokens),
+                FormatCompact(_stats.Claude.WeekTokens)), textFont, text, 10, y);
+
+            y += 18;
+            g.DrawString(string.Format(
+                "poll {0}s {1} {2}",
+                _options.RefreshSeconds,
+                _stats.Codex.Source,
+                _stats.SampledAt.ToString("HH:mm:ss", CultureInfo.InvariantCulture)), smallFont, muted, 10, y);
         }
     }
 
@@ -256,6 +275,13 @@ internal sealed class OverlayForm : Form
     private static double? RemainingPercent(double? usedPercent)
     {
         return usedPercent.HasValue ? Math.Max(0, 100 - usedPercent.Value) : (double?)null;
+    }
+
+    private static string FormatPercent(double? value)
+    {
+        return value.HasValue
+            ? value.Value.ToString("N0", CultureInfo.InvariantCulture) + "%"
+            : "--";
     }
 
     private static string FormatCompact(long value)
