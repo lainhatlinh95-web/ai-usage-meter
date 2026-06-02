@@ -239,6 +239,7 @@ internal sealed class OverlayForm : Form
         TopMost = true;
         ShowInTaskbar = false;
         BackColor = Color.FromArgb(18, 18, 26);
+        Opacity = 0.88;
         Width = 344;
         Height = OverlayHeight();
         Left = Screen.PrimaryScreen.WorkingArea.Right - Width - 18;
@@ -525,19 +526,22 @@ internal sealed class OverlayForm : Form
         using (var pctFont = new Font(theme.MonoFont, 12.75f, FontStyle.Bold))
         using (var pctSmall = new Font(theme.MonoFont, 7.5f, FontStyle.Bold))
         using (var labelFont = new Font("Segoe UI", 7.25f, FontStyle.Regular))
-        using (var rightFont = new Font(theme.MonoFont, 9f, FontStyle.Regular))
+        using (var rightFont = new Font("Segoe UI", 7.8f, FontStyle.Regular))
         {
             var valueText = displayPercent.HasValue ? ((int)Math.Round(displayPercent.Value)).ToString(CultureInfo.InvariantCulture) : right;
-            DrawText(g, valueText, pctFont, theme.Text, x, y);
-            var valueWidth = MeasureText(valueText, pctFont).Width;
-            if (displayPercent.HasValue) DrawText(g, "%", pctSmall, theme.Muted, x + valueWidth - 1, y + 7);
-            DrawText(g, label, labelFont, theme.Muted, x + valueWidth + (displayPercent.HasValue ? 17 : 10), y + 6);
-            var rs = MeasureText(right, rightFont);
-            if (displayPercent.HasValue) DrawText(g, right, rightFont, theme.Accent, x + w - rs.Width, y + 5);
+            DrawText(g, valueText, pctFont, theme.Text, new RectangleF(x, y, 42, 22), TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+            if (displayPercent.HasValue) DrawText(g, "%", pctSmall, theme.Muted, x + 43, y + 7);
+
+            var labelX = displayPercent.HasValue ? x + 62 : x + 88;
+            DrawText(g, label, labelFont, theme.Muted, new RectangleF(labelX, y + 5, 78, 16), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            if (displayPercent.HasValue)
+            {
+                var rightX = x + 145;
+                DrawText(g, right, rightFont, theme.Accent, new RectangleF(rightX, y + 4, w - (rightX - x), 17), TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            }
             else
             {
-                var detailSize = MeasureText(detail, labelFont);
-                DrawText(g, detail, labelFont, theme.Muted, x + w - detailSize.Width, y + 7);
+                DrawText(g, detail, labelFont, theme.Muted, new RectangleF(x + 185, y + 5, w - 185, 16), TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
             }
         }
 
