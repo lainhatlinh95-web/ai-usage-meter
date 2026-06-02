@@ -72,14 +72,107 @@ internal sealed class Options
     }
 }
 
+internal sealed class OverlayTheme
+{
+    public string Name;
+    public Color CardTop;
+    public Color CardBottom;
+    public Color Border;
+    public Color Text;
+    public Color Muted;
+    public Color Accent;
+    public Color Track;
+    public Color Ok;
+    public Color Warning;
+    public Color Critical;
+    public Color ButtonFill;
+    public string MonoFont;
+    public bool UppercaseTitle;
+    public bool Scanlines;
+    public bool TopAccentLine;
+
+    public static OverlayTheme DarkHud()
+    {
+        return new OverlayTheme
+        {
+            Name = "Dark HUD",
+            CardTop = Color.FromArgb(235, 18, 18, 26),
+            CardBottom = Color.FromArgb(245, 9, 9, 15),
+            Border = Color.FromArgb(88, 255, 255, 255),
+            Text = Color.FromArgb(245, 237, 236, 245),
+            Muted = Color.FromArgb(195, 154, 153, 176),
+            Accent = Color.FromArgb(255, 192, 132, 252),
+            Track = Color.FromArgb(58, 255, 255, 255),
+            Ok = Color.FromArgb(255, 52, 211, 153),
+            Warning = Color.FromArgb(255, 251, 191, 36),
+            Critical = Color.FromArgb(255, 251, 111, 111),
+            ButtonFill = Color.FromArgb(34, 255, 255, 255),
+            MonoFont = "Consolas",
+            UppercaseTitle = true,
+            Scanlines = true,
+            TopAccentLine = true
+        };
+    }
+
+    public static OverlayTheme Glass()
+    {
+        return new OverlayTheme
+        {
+            Name = "Glassmorphism",
+            CardTop = Color.FromArgb(218, 72, 48, 104),
+            CardBottom = Color.FromArgb(204, 38, 24, 70),
+            Border = Color.FromArgb(128, 255, 255, 255),
+            Text = Color.FromArgb(255, 255, 255, 255),
+            Muted = Color.FromArgb(210, 255, 255, 255),
+            Accent = Color.FromArgb(255, 233, 213, 255),
+            Track = Color.FromArgb(72, 255, 255, 255),
+            Ok = Color.FromArgb(255, 94, 234, 212),
+            Warning = Color.FromArgb(255, 252, 211, 77),
+            Critical = Color.FromArgb(255, 251, 113, 133),
+            ButtonFill = Color.FromArgb(55, 255, 255, 255),
+            MonoFont = "Consolas",
+            UppercaseTitle = true,
+            Scanlines = false,
+            TopAccentLine = false
+        };
+    }
+
+    public static OverlayTheme MacLight()
+    {
+        return new OverlayTheme
+        {
+            Name = "macOS Light",
+            CardTop = Color.FromArgb(250, 250, 250, 252),
+            CardBottom = Color.FromArgb(246, 242, 243, 246),
+            Border = Color.FromArgb(38, 0, 0, 0),
+            Text = Color.FromArgb(255, 29, 29, 31),
+            Muted = Color.FromArgb(255, 108, 108, 114),
+            Accent = Color.FromArgb(255, 0, 122, 255),
+            Track = Color.FromArgb(34, 0, 0, 0),
+            Ok = Color.FromArgb(255, 52, 199, 89),
+            Warning = Color.FromArgb(255, 255, 159, 10),
+            Critical = Color.FromArgb(255, 255, 59, 48),
+            ButtonFill = Color.FromArgb(210, 255, 255, 255),
+            MonoFont = "Consolas",
+            UppercaseTitle = false,
+            Scanlines = false,
+            TopAccentLine = false
+        };
+    }
+}
+
 internal sealed class OverlayForm : Form
 {
     private readonly Options _options;
     private readonly System.Windows.Forms.Timer _timer;
+    private readonly OverlayTheme[] _themes = new[] { OverlayTheme.DarkHud(), OverlayTheme.Glass(), OverlayTheme.MacLight() };
     private OverlayStats _stats;
     private string _error;
     private bool _dragging;
     private Point _dragStart;
+    private RectangleF _themeButton;
+    private int _themeIndex;
+    private ToolStripMenuItem[] _themeMenuItems;
 
     public OverlayForm(Options options)
     {
@@ -90,19 +183,16 @@ internal sealed class OverlayForm : Form
         TopMost = true;
         ShowInTaskbar = false;
         BackColor = Color.Black;
-        Opacity = 0.68;
-        Width = 310;
-        Height = 126;
+        Opacity = 0.94;
+        Width = 344;
+        Height = 148;
         Left = Screen.PrimaryScreen.WorkingArea.Right - Width - 18;
         Top = Screen.PrimaryScreen.WorkingArea.Top + 18;
         Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
         DoubleBuffered = true;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
 
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("Refresh", null, delegate { UpdateStats(); });
-        menu.Items.Add("Close", null, delegate { Close(); });
-        ContextMenuStrip = menu;
+        ContextMenuStrip = BuildMenu();
 
         MouseDown += StartDrag;
         MouseMove += MoveDrag;
@@ -117,6 +207,12 @@ internal sealed class OverlayForm : Form
     private void StartDrag(object sender, MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left) return;
+        if (_themeButton.Contains(e.Location))
+        {
+            ContextMenuStrip.Show(this, e.Location);
+            return;
+        }
+
         _dragging = true;
         _dragStart = e.Location;
     }
@@ -181,52 +277,72 @@ internal sealed class OverlayForm : Form
 
     private void DrawCompactOverlay(Graphics g, double? shortLeft, double? weekLeft)
     {
+        var theme = _themes[_themeIndex];
         var rect = new RectangleF(0.5f, 0.5f, ClientSize.Width - 1, ClientSize.Height - 1);
         using (var path = RoundedRect(rect, 18f))
-        using (var fill = new SolidBrush(Color.FromArgb(215, 16, 16, 16)))
-        using (var border = new Pen(Color.FromArgb(85, 255, 255, 255), 1f))
+        using (var fill = new LinearGradientBrush(rect, theme.CardTop, theme.CardBottom, LinearGradientMode.Vertical))
+        using (var border = new Pen(theme.Border, 1f))
         {
             g.FillPath(fill, path);
             g.DrawPath(border, path);
         }
 
-        using (var headerFont = new Font("Consolas", 9.2f, FontStyle.Bold))
-        using (var textFont = new Font("Consolas", 8.9f, FontStyle.Regular))
-        using (var smallFont = new Font("Consolas", 8.3f, FontStyle.Regular))
-        using (var header = new SolidBrush(Color.FromArgb(235, 245, 255, 245)))
-        using (var text = new SolidBrush(Color.FromArgb(225, 245, 245, 235)))
-        using (var muted = new SolidBrush(Color.FromArgb(185, 215, 220, 220)))
+        if (theme.Scanlines)
         {
-            var y = 7f;
-            g.DrawString("AI USAGE", headerFont, header, 10, y);
-            y = 25f;
+            using (var scan = new Pen(Color.FromArgb(8, 255, 255, 255), 1f))
+            {
+                for (var yScan = 3f; yScan < ClientSize.Height; yScan += 4f)
+                    g.DrawLine(scan, 1, yScan, ClientSize.Width - 2, yScan);
+            }
+        }
+
+        if (theme.TopAccentLine)
+        {
+            using (var accent = new Pen(theme.Accent, 2f))
+                g.DrawLine(accent, 18, 2, ClientSize.Width - 18, 2);
+        }
+
+        using (var headerFont = new Font(theme.MonoFont, 10.2f, FontStyle.Bold))
+        using (var textFont = new Font(theme.MonoFont, 9.2f, FontStyle.Regular))
+        using (var smallFont = new Font(theme.MonoFont, 8.3f, FontStyle.Regular))
+        using (var header = new SolidBrush(theme.Text))
+        using (var accentBrush = new SolidBrush(theme.Accent))
+        using (var text = new SolidBrush(theme.Text))
+        using (var muted = new SolidBrush(theme.Muted))
+        {
+            var y = 9f;
+            g.DrawString(theme.UppercaseTitle ? "AI " : "AI ", headerFont, header, 12, y);
+            g.DrawString(theme.UppercaseTitle ? "USAGE" : "Usage", headerFont, accentBrush, 34, y);
+            DrawThemeButton(g, theme, ClientSize.Width - 34, 8);
+
+            y = 30f;
             g.DrawString(string.Format(
                 "CODEX  {0,2} {1,7}  7d {2,7}",
                 FormatWindow(_stats.Codex.ShortWindowMinutes),
                 FormatCompact(_stats.Codex.HourTokens),
                 FormatCompact(_stats.Codex.WeekTokens)), textFont, text, 10, y);
 
-            y = 43f;
+            y = 50f;
             g.DrawString(string.Format(
                 "       5h left {0,4} reset {1}",
                 FormatPercent(shortLeft),
                 FormatReset(_stats.Codex.ShortReset)), textFont, text, 10, y);
-            DrawProgressBar(g, new RectangleF(10, 59, 290, 4), shortLeft);
+            DrawProgressBar(g, theme, new RectangleF(12, 67, ClientSize.Width - 24, 6), shortLeft);
 
-            y = 64f;
+            y = 76f;
             g.DrawString(string.Format(
                 "       7d left {0,4} reset {1}",
                 FormatPercent(weekLeft),
                 FormatReset(_stats.Codex.WeekReset)), textFont, text, 10, y);
-            DrawProgressBar(g, new RectangleF(10, 80, 290, 4), weekLeft);
+            DrawProgressBar(g, theme, new RectangleF(12, 93, ClientSize.Width - 24, 6), weekLeft);
 
-            y = 86f;
+            y = 105f;
             g.DrawString(string.Format(
                 "CLAUDE 1h {0,7}  7d {1,7}",
                 FormatCompact(_stats.Claude.HourTokens),
                 FormatCompact(_stats.Claude.WeekTokens)), textFont, text, 10, y);
 
-            y = 104f;
+            y = 126f;
             g.DrawString(string.Format(
                 "poll {0}s {1} {2}",
                 _options.RefreshSeconds,
@@ -235,10 +351,31 @@ internal sealed class OverlayForm : Form
         }
     }
 
-    private static void DrawProgressBar(Graphics g, RectangleF rect, double? remainingPercent)
+    private void DrawThemeButton(Graphics g, OverlayTheme theme, float x, float y)
+    {
+        _themeButton = new RectangleF(x, y, 24, 22);
+        using (var path = RoundedRect(_themeButton, 7f))
+        using (var fill = new SolidBrush(theme.ButtonFill))
+        using (var border = new Pen(theme.Border, 1f))
+        {
+            g.FillPath(fill, path);
+            g.DrawPath(border, path);
+        }
+
+        using (var pen = new Pen(theme.Muted, 1.4f))
+        using (var brush = new SolidBrush(theme.Muted))
+        {
+            g.DrawArc(pen, x + 5, y + 5, 13, 11, 135, 292);
+            g.FillEllipse(brush, x + 8, y + 9, 2, 2);
+            g.FillEllipse(brush, x + 11, y + 7, 2, 2);
+            g.FillEllipse(brush, x + 14, y + 10, 2, 2);
+        }
+    }
+
+    private static void DrawProgressBar(Graphics g, OverlayTheme theme, RectangleF rect, double? remainingPercent)
     {
         using (var trackPath = RoundedRect(rect, rect.Height / 2f))
-        using (var track = new SolidBrush(Color.FromArgb(230, 236, 238, 244)))
+        using (var track = new SolidBrush(theme.Track))
         {
             g.FillPath(track, trackPath);
         }
@@ -249,15 +386,47 @@ internal sealed class OverlayForm : Form
 
         var fillRect = new RectangleF(rect.Left, rect.Top, Math.Max(rect.Height, rect.Width * (float)(pct / 100.0)), rect.Height);
         var fillColor = pct <= 20
-            ? Color.FromArgb(255, 255, 105, 115)
+            ? theme.Critical
             : pct <= 35
-                ? Color.FromArgb(255, 245, 181, 68)
-                : Color.FromArgb(255, 35, 198, 100);
+                ? theme.Warning
+                : theme.Ok;
         using (var fillPath = RoundedRect(fillRect, rect.Height / 2f))
         using (var fill = new SolidBrush(fillColor))
         {
             g.FillPath(fill, fillPath);
         }
+    }
+
+    private ContextMenuStrip BuildMenu()
+    {
+        var menu = new ContextMenuStrip();
+        _themeMenuItems = new ToolStripMenuItem[_themes.Length];
+        for (var i = 0; i < _themes.Length; i++)
+        {
+            var index = i;
+            _themeMenuItems[i] = new ToolStripMenuItem(_themes[i].Name, null, delegate { SetTheme(index); });
+            menu.Items.Add(_themeMenuItems[i]);
+        }
+
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Refresh", null, delegate { UpdateStats(); });
+        menu.Items.Add("Close", null, delegate { Close(); });
+        UpdateThemeChecks();
+        return menu;
+    }
+
+    private void SetTheme(int index)
+    {
+        _themeIndex = index;
+        UpdateThemeChecks();
+        Invalidate();
+    }
+
+    private void UpdateThemeChecks()
+    {
+        if (_themeMenuItems == null) return;
+        for (var i = 0; i < _themeMenuItems.Length; i++)
+            _themeMenuItems[i].Checked = i == _themeIndex;
     }
 
     private static GraphicsPath RoundedRect(RectangleF rect, float radius)

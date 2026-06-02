@@ -23,7 +23,8 @@ source, rebuild it with:
 build.cmd
 ```
 
-Right-click the overlay to close it. Drag it with the left mouse button.
+Click the palette button or right-click the overlay to switch between Dark HUD,
+Glassmorphism, and macOS Light styles. Drag it with the left mouse button.
 
 ## What It Shows
 
