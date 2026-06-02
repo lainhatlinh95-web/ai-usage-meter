@@ -191,8 +191,7 @@ internal sealed class OverlayForm : Form
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
         ShowInTaskbar = false;
-        BackColor = Color.Fuchsia;
-        TransparencyKey = Color.Fuchsia;
+        BackColor = Color.FromArgb(18, 18, 26);
         Opacity = 1.0;
         Width = 344;
         Height = OverlayHeight();
@@ -270,6 +269,7 @@ internal sealed class OverlayForm : Form
         {
             _stats = UsageReader.Read(_options);
             _error = null;
+            ApplyOverlaySize();
         }
         catch (Exception ex)
         {
@@ -283,6 +283,9 @@ internal sealed class OverlayForm : Form
         base.OnPaint(e);
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        g.CompositingQuality = CompositingQuality.HighQuality;
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
         if (!string.IsNullOrEmpty(_error))
@@ -312,7 +315,7 @@ internal sealed class OverlayForm : Form
     private void DrawOverlayCard(Graphics g)
     {
         var theme = _themes[_themeIndex];
-        if (Height != OverlayHeight()) ApplyOverlaySize();
+        if (Width != OverlayWidth() || Height != OverlayHeight()) ApplyOverlaySize();
         var rect = new RectangleF(0.5f, 0.5f, ClientSize.Width - 1, ClientSize.Height - 1);
         using (var path = RoundedRect(rect, 18f))
         using (var fill = new LinearGradientBrush(rect, theme.CardTop, theme.CardBottom, LinearGradientMode.Vertical))
@@ -353,34 +356,39 @@ internal sealed class OverlayForm : Form
             _stats.Codex.WeekUsedPercent,
             RemainingPercent(_stats.Codex.ShortUsedPercent),
             RemainingPercent(_stats.Codex.WeekUsedPercent),
+            true,
             "5-HR LEFT",
-            string.Format(CultureInfo.InvariantCulture, "{0} reset", FormatRemaining(_stats.Codex.ShortReset)),
+            FormatResetLabel(_stats.Codex.ShortReset),
             "WEEKLY LEFT",
-            string.Format(CultureInfo.InvariantCulture, "{0} reset", FormatRemaining(_stats.Codex.WeekReset)),
+            FormatResetLabel(_stats.Codex.WeekReset),
             string.Format(CultureInfo.InvariantCulture, "{0} tokens", FormatCompact(_stats.Codex.HourTokens)),
             string.Format(CultureInfo.InvariantCulture, "{0} tokens", FormatCompact(_stats.Codex.WeekTokens)));
 
-        using (var line = new Pen(theme.Divider, 1f))
-            g.DrawLine(line, 14, y, ClientSize.Width - 14, y);
+        if (HasClaudeData())
+        {
+            using (var line = new Pen(theme.Divider, 1f))
+                g.DrawLine(line, 14, y, ClientSize.Width - 14, y);
 
-        y = DrawToolBlock(
-            g,
-            theme,
-            y,
-            "Claude",
-            "Anthropic",
-            "C",
-            Color.FromArgb(224, 138, 95),
-            null,
-            null,
-            null,
-            null,
-            "1-HR TOKENS",
-            FormatCompact(_stats.Claude.HourTokens),
-            "WEEKLY TOKENS",
-            FormatCompact(_stats.Claude.WeekTokens),
-            "local log total",
-            "local log total");
+            y = DrawToolBlock(
+                g,
+                theme,
+                y,
+                "Claude",
+                "Anthropic",
+                "C",
+                Color.FromArgb(224, 138, 95),
+                null,
+                null,
+                null,
+                null,
+                false,
+                "1-HR TOKENS",
+                FormatCompact(_stats.Claude.HourTokens),
+                "WEEKLY TOKENS",
+                FormatCompact(_stats.Claude.WeekTokens),
+                "local log total",
+                "local log total");
+        }
 
         DrawFooter(g, theme, y);
     }
@@ -422,6 +430,7 @@ internal sealed class OverlayForm : Form
         double? weeklyStatusUsed,
         double? primaryDisplayPercent,
         double? weeklyDisplayPercent,
+        bool showWeekly,
         string primaryLabel,
         string primaryRight,
         string weeklyLabel,
@@ -447,7 +456,7 @@ internal sealed class OverlayForm : Form
         DrawMeter(g, theme, 14, y, ClientSize.Width - 28, primaryLabel, primaryDisplayPercent, primaryStatusUsed, primaryRight, primaryDetail, tint);
         y += 46;
 
-        if (_showWeekly)
+        if (showWeekly)
         {
             using (var labelFont = new Font("Segoe UI", 9f, FontStyle.Bold, GraphicsUnit.Pixel))
             using (var muted = new SolidBrush(theme.Muted))
@@ -665,7 +674,8 @@ internal sealed class OverlayForm : Form
 
     private int OverlayHeight()
     {
-        return _minimized ? 64 : (_showWeekly ? 394 : 274);
+        if (_minimized) return 64;
+        return HasClaudeData() ? 326 : 226;
     }
 
     private int OverlayWidth()
@@ -691,29 +701,19 @@ internal sealed class OverlayForm : Form
 
     private void DrawFooter(Graphics g, OverlayTheme theme, float y)
     {
+        _weeklyButton = RectangleF.Empty;
         using (var line = new Pen(theme.Divider, 1f))
             g.DrawLine(line, 14, y, ClientSize.Width - 14, y);
 
         using (var smallFont = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Pixel))
-        using (var buttonFont = new Font("Segoe UI", 10.5f, FontStyle.Bold, GraphicsUnit.Pixel))
         using (var muted = new SolidBrush(theme.Muted))
         {
             g.DrawString(
                 string.Format("Synced {0} - {1}", _stats.SampledAt.ToString("HH:mm:ss", CultureInfo.InvariantCulture), _stats.Codex.Source),
                 smallFont,
                 muted,
-                32,
+                14,
                 y + 16);
-
-            var label = _showWeekly ? "HIDE WEEKLY" : "WEEKLY";
-            var labelSize = g.MeasureString(label, buttonFont);
-            var bw = labelSize.Width + 25;
-            _weeklyButton = new RectangleF(ClientSize.Width - 14 - bw, y + 10, bw, 24);
-            using (var path = RoundedRect(_weeklyButton, 7f))
-            using (var border = new Pen(theme.Border, 1f))
-                g.DrawPath(border, path);
-            g.DrawString(label, buttonFont, muted, _weeklyButton.Left + 10, _weeklyButton.Top + 5);
-            DrawChevron(g, theme.Muted, _weeklyButton.Right - 12, _weeklyButton.Top + 12, _showWeekly);
         }
     }
 
@@ -779,6 +779,24 @@ internal sealed class OverlayForm : Form
         if (remaining <= TimeSpan.Zero) return "now";
         if (remaining.TotalDays >= 1) return string.Format(CultureInfo.InvariantCulture, "{0}d {1:00}h {2:00}m", (int)remaining.TotalDays, remaining.Hours, remaining.Minutes);
         return string.Format(CultureInfo.InvariantCulture, "{0}h {1:00}m {2:00}s", (int)remaining.TotalHours, remaining.Minutes, remaining.Seconds);
+    }
+
+    private static string FormatResetLabel(DateTime? value)
+    {
+        return value.HasValue
+            ? "reset " + value.Value.ToString("yyyy/MM/dd H:mm", CultureInfo.InvariantCulture)
+            : "reset --";
+    }
+
+    private bool HasClaudeData()
+    {
+        return _stats != null &&
+            (_stats.Claude.HourTokens > 0 ||
+             _stats.Claude.WeekTokens > 0 ||
+             _stats.Claude.ShortUsedPercent.HasValue ||
+             _stats.Claude.WeekUsedPercent.HasValue ||
+             _stats.Claude.ShortReset.HasValue ||
+             _stats.Claude.WeekReset.HasValue);
     }
 
     private static StringFormat Centered()
