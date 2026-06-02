@@ -9,6 +9,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 internal static class Program
@@ -16,6 +17,7 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        NativeUi.EnableDpiAwareness();
         var options = Options.Parse(args);
         if (options.Once)
         {
@@ -69,6 +71,50 @@ internal sealed class Options
     private static bool EqualsAny(string value, params string[] names)
     {
         return names.Any(name => string.Equals(value, name, StringComparison.OrdinalIgnoreCase));
+    }
+}
+
+internal static class NativeUi
+{
+    private const int DpiAwarenessContextPerMonitorAwareV2 = -4;
+    private const int DwmwaWindowCornerPreference = 33;
+    private const int DwmwcpRound = 2;
+
+    [DllImport("user32.dll")]
+    private static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
+
+    [DllImport("shcore.dll")]
+    private static extern int SetProcessDpiAwareness(int value);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int attributeValue, int attributeSize);
+
+    public static void EnableDpiAwareness()
+    {
+        try
+        {
+            if (SetProcessDpiAwarenessContext(new IntPtr(DpiAwarenessContextPerMonitorAwareV2))) return;
+        }
+        catch { }
+
+        try
+        {
+            SetProcessDpiAwareness(2);
+        }
+        catch { }
+    }
+
+    public static bool TryEnableRoundedCorners(IntPtr hwnd)
+    {
+        try
+        {
+            var preference = DwmwcpRound;
+            return DwmSetWindowAttribute(hwnd, DwmwaWindowCornerPreference, ref preference, sizeof(int)) == 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
 
@@ -181,6 +227,7 @@ internal sealed class OverlayForm : Form
     private int _themeIndex;
     private bool _showWeekly;
     private bool _minimized;
+    private bool _usingDwmCorners;
     private ToolStripMenuItem[] _themeMenuItems;
 
     public OverlayForm(Options options)
@@ -192,7 +239,6 @@ internal sealed class OverlayForm : Form
         TopMost = true;
         ShowInTaskbar = false;
         BackColor = Color.FromArgb(18, 18, 26);
-        Opacity = 1.0;
         Width = 344;
         Height = OverlayHeight();
         Left = Screen.PrimaryScreen.WorkingArea.Right - Width - 18;
@@ -212,6 +258,19 @@ internal sealed class OverlayForm : Form
         _timer.Tick += delegate { UpdateStats(); };
         _timer.Start();
         UpdateStats();
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        _usingDwmCorners = NativeUi.TryEnableRoundedCorners(Handle);
+        ApplyShape();
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        ApplyShape();
     }
 
     private void StartDrag(object sender, MouseEventArgs e)
@@ -290,21 +349,15 @@ internal sealed class OverlayForm : Form
 
         if (!string.IsNullOrEmpty(_error))
         {
-            using (var brush = new SolidBrush(Color.FromArgb(235, 255, 255, 255)))
             using (var font = new Font("Segoe UI", 11f, FontStyle.Regular))
-            {
-                g.DrawString("AI Usage: " + _error, font, brush, 18, 18);
-            }
+                DrawText(g, "AI Usage: " + _error, font, Color.FromArgb(235, 255, 255, 255), 18, 18);
             return;
         }
 
         if (_stats == null)
         {
-            using (var brush = new SolidBrush(Color.FromArgb(235, 255, 255, 255)))
             using (var font = new Font("Segoe UI", 11f, FontStyle.Regular))
-            {
-                g.DrawString("AI Usage: loading", font, brush, 18, 18);
-            }
+                DrawText(g, "AI Usage: loading", font, Color.FromArgb(235, 255, 255, 255), 18, 18);
             return;
         }
 
@@ -401,17 +454,14 @@ internal sealed class OverlayForm : Form
                 g.DrawLine(grip, 14, 17 + i * 4, 26, 17 + i * 4);
         }
 
-        using (var headerFont = new Font("Segoe UI", 13f, FontStyle.Bold, GraphicsUnit.Pixel))
-        using (var header = new SolidBrush(theme.Text))
-        using (var accentBrush = new SolidBrush(theme.Accent))
-        using (var muted = new SolidBrush(theme.Muted))
+        using (var headerFont = new Font("Segoe UI", 10f, FontStyle.Bold))
+        using (var liveFont = new Font("Segoe UI", 7f, FontStyle.Bold))
         {
-            g.DrawString("AI ", headerFont, header, 32, 14);
-            g.DrawString(theme.UppercaseTitle ? "USAGE" : "Usage", headerFont, accentBrush, 53, 14);
+            DrawText(g, "AI ", headerFont, theme.Text, 32, 13);
+            DrawText(g, theme.UppercaseTitle ? "USAGE" : "Usage", headerFont, theme.Accent, 53, 13);
             using (var dot = new SolidBrush(theme.Ok))
                 g.FillEllipse(dot, 125, 22, 6, 6);
-            using (var liveFont = new Font("Segoe UI", 9f, FontStyle.Bold, GraphicsUnit.Pixel))
-                g.DrawString("LIVE", liveFont, muted, 136, 18);
+            DrawText(g, "LIVE", liveFont, theme.Muted, 136, 17);
         }
 
         DrawThemeButton(g, theme, ClientSize.Width - 64, 11);
@@ -441,13 +491,11 @@ internal sealed class OverlayForm : Form
         y += 11;
         DrawBadge(g, theme, 14, y, letter, tint);
 
-        using (var nameFont = new Font("Segoe UI", 14f, FontStyle.Bold, GraphicsUnit.Pixel))
-        using (var subFont = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Pixel))
-        using (var text = new SolidBrush(theme.Text))
-        using (var muted = new SolidBrush(theme.Muted))
+        using (var nameFont = new Font("Segoe UI", 10.5f, FontStyle.Bold))
+        using (var subFont = new Font("Segoe UI", 7.25f, FontStyle.Regular))
         {
-            g.DrawString(name, nameFont, text, 54, y - 1);
-            g.DrawString(sub.ToUpperInvariant(), subFont, muted, 55, y + 18);
+            DrawText(g, name, nameFont, theme.Text, 54, y - 1);
+            DrawText(g, sub.ToUpperInvariant(), subFont, theme.Muted, 55, y + 18);
         }
 
         DrawStatus(g, theme, ClientSize.Width - 14, y + 15, primaryStatusUsed);
@@ -458,11 +506,10 @@ internal sealed class OverlayForm : Form
 
         if (showWeekly)
         {
-            using (var labelFont = new Font("Segoe UI", 9f, FontStyle.Bold, GraphicsUnit.Pixel))
-            using (var muted = new SolidBrush(theme.Muted))
+            using (var labelFont = new Font("Segoe UI", 7f, FontStyle.Bold))
             using (var line = new Pen(theme.Divider, 1f))
             {
-                g.DrawString("WEEKLY", labelFont, muted, 14, y + 3);
+                DrawText(g, "WEEKLY", labelFont, theme.Muted, 14, y + 2);
                 g.DrawLine(line, 63, y + 9, ClientSize.Width - 14, y + 9);
             }
             y += 22;
@@ -475,25 +522,22 @@ internal sealed class OverlayForm : Form
 
     private static void DrawMeter(Graphics g, OverlayTheme theme, float x, float y, float w, string label, double? displayPercent, double? statusUsed, string right, string detail, Color tint)
     {
-        using (var pctFont = new Font(theme.MonoFont, 17f, FontStyle.Bold, GraphicsUnit.Pixel))
-        using (var pctSmall = new Font(theme.MonoFont, 10f, FontStyle.Bold, GraphicsUnit.Pixel))
-        using (var labelFont = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Pixel))
-        using (var rightFont = new Font(theme.MonoFont, 12f, FontStyle.Regular, GraphicsUnit.Pixel))
-        using (var text = new SolidBrush(theme.Text))
-        using (var muted = new SolidBrush(theme.Muted))
-        using (var accent = new SolidBrush(theme.Accent))
+        using (var pctFont = new Font(theme.MonoFont, 12.75f, FontStyle.Bold))
+        using (var pctSmall = new Font(theme.MonoFont, 7.5f, FontStyle.Bold))
+        using (var labelFont = new Font("Segoe UI", 7.25f, FontStyle.Regular))
+        using (var rightFont = new Font(theme.MonoFont, 9f, FontStyle.Regular))
         {
             var valueText = displayPercent.HasValue ? ((int)Math.Round(displayPercent.Value)).ToString(CultureInfo.InvariantCulture) : right;
-            g.DrawString(valueText, pctFont, text, x, y);
-            var valueWidth = g.MeasureString(valueText, pctFont).Width;
-            if (displayPercent.HasValue) g.DrawString("%", pctSmall, muted, x + valueWidth - 1, y + 7);
-            g.DrawString(label, labelFont, muted, x + valueWidth + (displayPercent.HasValue ? 17 : 10), y + 6);
-            var rs = g.MeasureString(right, rightFont);
-            if (displayPercent.HasValue) g.DrawString(right, rightFont, accent, x + w - rs.Width, y + 5);
+            DrawText(g, valueText, pctFont, theme.Text, x, y);
+            var valueWidth = MeasureText(valueText, pctFont).Width;
+            if (displayPercent.HasValue) DrawText(g, "%", pctSmall, theme.Muted, x + valueWidth - 1, y + 7);
+            DrawText(g, label, labelFont, theme.Muted, x + valueWidth + (displayPercent.HasValue ? 17 : 10), y + 6);
+            var rs = MeasureText(right, rightFont);
+            if (displayPercent.HasValue) DrawText(g, right, rightFont, theme.Accent, x + w - rs.Width, y + 5);
             else
             {
-                var detailSize = g.MeasureString(detail, labelFont);
-                g.DrawString(detail, labelFont, muted, x + w - detailSize.Width, y + 7);
+                var detailSize = MeasureText(detail, labelFont);
+                DrawText(g, detail, labelFont, theme.Muted, x + w - detailSize.Width, y + 7);
             }
         }
 
@@ -547,10 +591,8 @@ internal sealed class OverlayForm : Form
             g.DrawPath(border, path);
         }
 
-        using (var font = new Font("Segoe UI", 14f, FontStyle.Bold, GraphicsUnit.Pixel))
-        using (var brush = new SolidBrush(tint))
-        using (var sf = Centered())
-            g.DrawString(letter, font, brush, rect, sf);
+        using (var font = new Font("Segoe UI", 10.5f, FontStyle.Bold))
+            DrawText(g, letter, font, tint, rect, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
     }
 
     private static void DrawStatus(Graphics g, OverlayTheme theme, float right, float centerY, double? used)
@@ -558,15 +600,14 @@ internal sealed class OverlayForm : Form
         var pct = used.HasValue ? used.Value : 0;
         var label = !used.HasValue ? "LOCAL" : pct >= 90 ? "CRITICAL" : pct >= 70 ? "LOW" : "HEALTHY";
         var color = !used.HasValue ? theme.Muted : pct >= 90 ? theme.Critical : pct >= 70 ? theme.Warning : theme.Ok;
-        using (var font = new Font("Segoe UI", 9.5f, FontStyle.Bold, GraphicsUnit.Pixel))
+        using (var font = new Font("Segoe UI", 7.25f, FontStyle.Bold))
         {
-            var size = g.MeasureString(label, font);
+            var size = MeasureText(label, font);
             var rect = new RectangleF(right - size.Width - 14, centerY - 9, size.Width + 14, 18);
             using (var path = RoundedRect(rect, 6f))
             using (var fill = new SolidBrush(Color.FromArgb(42, color)))
                 g.FillPath(fill, path);
-            using (var brush = new SolidBrush(color))
-                g.DrawString(label, font, brush, rect.Left + 7, rect.Top + 3);
+            DrawText(g, label, font, color, rect.Left + 7, rect.Top + 2);
         }
     }
 
@@ -646,13 +687,11 @@ internal sealed class OverlayForm : Form
         DrawMiniRing(g, theme, 13, 13, _stats.Codex.ShortUsedPercent, Color.FromArgb(45, 212, 191));
         DrawMiniRing(g, theme, 58, 13, null, Color.FromArgb(224, 138, 95));
 
-        using (var labelFont = new Font("Segoe UI", 9f, FontStyle.Bold, GraphicsUnit.Pixel))
-        using (var valueFont = new Font(theme.MonoFont, 14f, FontStyle.Regular, GraphicsUnit.Pixel))
-        using (var muted = new SolidBrush(theme.Muted))
-        using (var accent = new SolidBrush(theme.Accent))
+        using (var labelFont = new Font("Segoe UI", 7f, FontStyle.Bold))
+        using (var valueFont = new Font(theme.MonoFont, 10.5f, FontStyle.Regular))
         {
-            g.DrawString("CODEX 5H RESET", labelFont, muted, 112, 14);
-            g.DrawString(FormatRemaining(_stats.Codex.ShortReset), valueFont, accent, 112, 28);
+            DrawText(g, "CODEX 5H RESET", labelFont, theme.Muted, 112, 14);
+            DrawText(g, FormatRemaining(_stats.Codex.ShortReset), valueFont, theme.Accent, 112, 28);
         }
     }
 
@@ -666,10 +705,8 @@ internal sealed class OverlayForm : Form
             using (var fill = new Pen(used.Value >= 90 ? theme.Critical : used.Value >= 70 ? theme.Warning : tint, 4f))
                 g.DrawArc(fill, rect, -90, (float)(360.0 * Math.Max(0, Math.Min(100, used.Value)) / 100.0));
         }
-        using (var font = new Font(theme.MonoFont, 10f, FontStyle.Bold, GraphicsUnit.Pixel))
-        using (var brush = new SolidBrush(used.HasValue ? tint : theme.Muted))
-        using (var sf = Centered())
-            g.DrawString(used.HasValue ? ((int)Math.Round(used.Value)).ToString(CultureInfo.InvariantCulture) : "C", font, brush, new RectangleF(x, y, 38, 38), sf);
+        using (var font = new Font(theme.MonoFont, 7.5f, FontStyle.Bold))
+            DrawText(g, used.HasValue ? ((int)Math.Round(used.Value)).ToString(CultureInfo.InvariantCulture) : "C", font, used.HasValue ? tint : theme.Muted, new RectangleF(x, y, 38, 38), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
     }
 
     private int OverlayHeight()
@@ -694,6 +731,16 @@ internal sealed class OverlayForm : Form
 
     private void ApplyShape()
     {
+        if (_usingDwmCorners)
+        {
+            if (Region != null)
+            {
+                Region.Dispose();
+                Region = null;
+            }
+            return;
+        }
+
         var radius = _minimized ? 18f : 18f;
         using (var path = RoundedRect(new RectangleF(0, 0, ClientSize.Width, ClientSize.Height), radius))
             Region = new Region(path);
@@ -705,13 +752,12 @@ internal sealed class OverlayForm : Form
         using (var line = new Pen(theme.Divider, 1f))
             g.DrawLine(line, 14, y, ClientSize.Width - 14, y);
 
-        using (var smallFont = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Pixel))
-        using (var muted = new SolidBrush(theme.Muted))
+        using (var smallFont = new Font("Segoe UI", 7.5f, FontStyle.Regular))
         {
-            g.DrawString(
+            DrawText(g,
                 string.Format("Synced {0} - {1}", _stats.SampledAt.ToString("HH:mm:ss", CultureInfo.InvariantCulture), _stats.Codex.Source),
                 smallFont,
-                muted,
+                theme.Muted,
                 14,
                 y + 16);
         }
@@ -799,9 +845,29 @@ internal sealed class OverlayForm : Form
              _stats.Claude.WeekReset.HasValue);
     }
 
-    private static StringFormat Centered()
+    private static void DrawText(Graphics g, string text, Font font, Color color, float x, float y)
     {
-        return new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+        TextRenderer.DrawText(g, text, font, new Point(Round(x), Round(y)), color, TextFlags());
+    }
+
+    private static void DrawText(Graphics g, string text, Font font, Color color, RectangleF rect, TextFormatFlags extraFlags)
+    {
+        TextRenderer.DrawText(g, text, font, Rectangle.Round(rect), color, TextFlags() | extraFlags);
+    }
+
+    private static Size MeasureText(string text, Font font)
+    {
+        return TextRenderer.MeasureText(text, font, new Size(int.MaxValue, int.MaxValue), TextFlags());
+    }
+
+    private static TextFormatFlags TextFlags()
+    {
+        return TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.PreserveGraphicsClipping;
+    }
+
+    private static int Round(float value)
+    {
+        return (int)Math.Round(value, MidpointRounding.AwayFromZero);
     }
 
     private static string FormatPercent(double? value)
