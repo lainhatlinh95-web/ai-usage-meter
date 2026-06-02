@@ -350,10 +350,12 @@ internal sealed class OverlayForm : Form
             "C",
             Color.FromArgb(45, 212, 191),
             _stats.Codex.ShortUsedPercent,
-            "5-HR WINDOW",
-            string.Format(CultureInfo.InvariantCulture, "{0} reset", FormatRemaining(_stats.Codex.ShortReset)),
             _stats.Codex.WeekUsedPercent,
-            "WEEKLY",
+            RemainingPercent(_stats.Codex.ShortUsedPercent),
+            RemainingPercent(_stats.Codex.WeekUsedPercent),
+            "5-HR LEFT",
+            string.Format(CultureInfo.InvariantCulture, "{0} reset", FormatRemaining(_stats.Codex.ShortReset)),
+            "WEEKLY LEFT",
             string.Format(CultureInfo.InvariantCulture, "{0} reset", FormatRemaining(_stats.Codex.WeekReset)),
             string.Format(CultureInfo.InvariantCulture, "{0} tokens", FormatCompact(_stats.Codex.HourTokens)),
             string.Format(CultureInfo.InvariantCulture, "{0} tokens", FormatCompact(_stats.Codex.WeekTokens)));
@@ -370,9 +372,11 @@ internal sealed class OverlayForm : Form
             "C",
             Color.FromArgb(224, 138, 95),
             null,
+            null,
+            null,
+            null,
             "1-HR TOKENS",
             FormatCompact(_stats.Claude.HourTokens),
-            null,
             "WEEKLY TOKENS",
             FormatCompact(_stats.Claude.WeekTokens),
             "local log total",
@@ -414,10 +418,12 @@ internal sealed class OverlayForm : Form
         string sub,
         string letter,
         Color tint,
-        double? primaryUsed,
+        double? primaryStatusUsed,
+        double? weeklyStatusUsed,
+        double? primaryDisplayPercent,
+        double? weeklyDisplayPercent,
         string primaryLabel,
         string primaryRight,
-        double? weeklyUsed,
         string weeklyLabel,
         string weeklyRight,
         string primaryDetail,
@@ -435,10 +441,10 @@ internal sealed class OverlayForm : Form
             g.DrawString(sub.ToUpperInvariant(), subFont, muted, 55, y + 18);
         }
 
-        DrawStatus(g, theme, ClientSize.Width - 14, y + 15, primaryUsed);
+        DrawStatus(g, theme, ClientSize.Width - 14, y + 15, primaryStatusUsed);
 
         y += 46;
-        DrawMeter(g, theme, 14, y, ClientSize.Width - 28, primaryLabel, primaryUsed, primaryRight, primaryDetail, tint);
+        DrawMeter(g, theme, 14, y, ClientSize.Width - 28, primaryLabel, primaryDisplayPercent, primaryStatusUsed, primaryRight, primaryDetail, tint);
         y += 46;
 
         if (_showWeekly)
@@ -451,14 +457,14 @@ internal sealed class OverlayForm : Form
                 g.DrawLine(line, 63, y + 9, ClientSize.Width - 14, y + 9);
             }
             y += 22;
-            DrawMeter(g, theme, 14, y, ClientSize.Width - 28, weeklyLabel, weeklyUsed, weeklyRight, weeklyDetail, tint);
+            DrawMeter(g, theme, 14, y, ClientSize.Width - 28, weeklyLabel, weeklyDisplayPercent, weeklyStatusUsed, weeklyRight, weeklyDetail, tint);
             y += 46;
         }
 
         return y + 10;
     }
 
-    private static void DrawMeter(Graphics g, OverlayTheme theme, float x, float y, float w, string label, double? used, string right, string detail, Color tint)
+    private static void DrawMeter(Graphics g, OverlayTheme theme, float x, float y, float w, string label, double? displayPercent, double? statusUsed, string right, string detail, Color tint)
     {
         using (var pctFont = new Font(theme.MonoFont, 17f, FontStyle.Bold, GraphicsUnit.Pixel))
         using (var pctSmall = new Font(theme.MonoFont, 10f, FontStyle.Bold, GraphicsUnit.Pixel))
@@ -468,13 +474,13 @@ internal sealed class OverlayForm : Form
         using (var muted = new SolidBrush(theme.Muted))
         using (var accent = new SolidBrush(theme.Accent))
         {
-            var valueText = used.HasValue ? ((int)Math.Round(used.Value)).ToString(CultureInfo.InvariantCulture) : right;
+            var valueText = displayPercent.HasValue ? ((int)Math.Round(displayPercent.Value)).ToString(CultureInfo.InvariantCulture) : right;
             g.DrawString(valueText, pctFont, text, x, y);
             var valueWidth = g.MeasureString(valueText, pctFont).Width;
-            if (used.HasValue) g.DrawString("%", pctSmall, muted, x + valueWidth - 1, y + 7);
-            g.DrawString(label, labelFont, muted, x + valueWidth + (used.HasValue ? 17 : 10), y + 6);
+            if (displayPercent.HasValue) g.DrawString("%", pctSmall, muted, x + valueWidth - 1, y + 7);
+            g.DrawString(label, labelFont, muted, x + valueWidth + (displayPercent.HasValue ? 17 : 10), y + 6);
             var rs = g.MeasureString(right, rightFont);
-            if (used.HasValue) g.DrawString(right, rightFont, accent, x + w - rs.Width, y + 5);
+            if (displayPercent.HasValue) g.DrawString(right, rightFont, accent, x + w - rs.Width, y + 5);
             else
             {
                 var detailSize = g.MeasureString(detail, labelFont);
@@ -482,7 +488,7 @@ internal sealed class OverlayForm : Form
             }
         }
 
-        DrawProgressBar(g, theme, new RectangleF(x, y + 27, w, 8), used, tint);
+        DrawProgressBar(g, theme, new RectangleF(x, y + 27, w, 8), displayPercent, statusUsed, tint);
     }
 
     private void DrawThemeButton(Graphics g, OverlayTheme theme, float x, float y)
@@ -583,7 +589,7 @@ internal sealed class OverlayForm : Form
         }
     }
 
-    private static void DrawProgressBar(Graphics g, OverlayTheme theme, RectangleF rect, double? usedPercent, Color tint)
+    private static void DrawProgressBar(Graphics g, OverlayTheme theme, RectangleF rect, double? displayPercent, double? statusUsed, Color tint)
     {
         using (var trackPath = RoundedRect(rect, rect.Height / 2f))
         using (var track = new SolidBrush(theme.Track))
@@ -591,14 +597,15 @@ internal sealed class OverlayForm : Form
             g.FillPath(track, trackPath);
         }
 
-        if (!usedPercent.HasValue) return;
-        var pct = Math.Max(0, Math.Min(100, usedPercent.Value));
+        if (!displayPercent.HasValue) return;
+        var pct = Math.Max(0, Math.Min(100, displayPercent.Value));
         if (pct <= 0) return;
 
         var fillRect = new RectangleF(rect.Left, rect.Top, Math.Max(rect.Height, rect.Width * (float)(pct / 100.0)), rect.Height);
-        var fillColor = pct >= 90
+        var used = statusUsed.HasValue ? statusUsed.Value : 0;
+        var fillColor = used >= 90
             ? theme.Critical
-            : pct >= 70
+            : used >= 70
                 ? theme.Warning
                 : tint;
         using (var fillPath = RoundedRect(fillRect, rect.Height / 2f))
