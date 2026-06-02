@@ -97,8 +97,8 @@ internal sealed class OverlayTheme
         return new OverlayTheme
         {
             Name = "Dark HUD",
-            CardTop = Color.FromArgb(235, 18, 18, 26),
-            CardBottom = Color.FromArgb(245, 9, 9, 15),
+            CardTop = Color.FromArgb(255, 18, 18, 26),
+            CardBottom = Color.FromArgb(255, 9, 9, 15),
             Border = Color.FromArgb(88, 255, 255, 255),
             Divider = Color.FromArgb(28, 255, 255, 255),
             Text = Color.FromArgb(245, 237, 236, 245),
@@ -121,8 +121,8 @@ internal sealed class OverlayTheme
         return new OverlayTheme
         {
             Name = "Glassmorphism",
-            CardTop = Color.FromArgb(218, 72, 48, 104),
-            CardBottom = Color.FromArgb(204, 38, 24, 70),
+            CardTop = Color.FromArgb(255, 72, 48, 104),
+            CardBottom = Color.FromArgb(255, 38, 24, 70),
             Border = Color.FromArgb(128, 255, 255, 255),
             Divider = Color.FromArgb(42, 255, 255, 255),
             Text = Color.FromArgb(255, 255, 255, 255),
@@ -145,8 +145,8 @@ internal sealed class OverlayTheme
         return new OverlayTheme
         {
             Name = "macOS Light",
-            CardTop = Color.FromArgb(250, 250, 250, 252),
-            CardBottom = Color.FromArgb(246, 242, 243, 246),
+            CardTop = Color.FromArgb(255, 250, 250, 252),
+            CardBottom = Color.FromArgb(255, 242, 243, 246),
             Border = Color.FromArgb(38, 0, 0, 0),
             Divider = Color.FromArgb(24, 0, 0, 0),
             Text = Color.FromArgb(255, 29, 29, 31),
@@ -175,9 +175,12 @@ internal sealed class OverlayForm : Form
     private bool _dragging;
     private Point _dragStart;
     private RectangleF _themeButton;
+    private RectangleF _minimizeButton;
     private RectangleF _weeklyButton;
+    private RectangleF _pillButton;
     private int _themeIndex;
     private bool _showWeekly;
+    private bool _minimized;
     private ToolStripMenuItem[] _themeMenuItems;
 
     public OverlayForm(Options options)
@@ -188,10 +191,11 @@ internal sealed class OverlayForm : Form
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
         ShowInTaskbar = false;
-        BackColor = Color.Black;
-        Opacity = 0.94;
+        BackColor = Color.Fuchsia;
+        TransparencyKey = Color.Fuchsia;
+        Opacity = 1.0;
         Width = 344;
-        Height = CardHeight();
+        Height = OverlayHeight();
         Left = Screen.PrimaryScreen.WorkingArea.Right - Width - 18;
         Top = Screen.PrimaryScreen.WorkingArea.Top + 18;
         Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
@@ -199,6 +203,7 @@ internal sealed class OverlayForm : Form
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
 
         ContextMenuStrip = BuildMenu();
+        ApplyShape();
 
         MouseDown += StartDrag;
         MouseMove += MoveDrag;
@@ -213,15 +218,32 @@ internal sealed class OverlayForm : Form
     private void StartDrag(object sender, MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left) return;
+        if (_minimized)
+        {
+            if (_pillButton.Contains(e.Location))
+            {
+                _minimized = false;
+                ApplyOverlaySize();
+                Invalidate();
+                return;
+            }
+        }
         if (_themeButton.Contains(e.Location))
         {
             ContextMenuStrip.Show(this, e.Location);
             return;
         }
+        if (_minimizeButton.Contains(e.Location))
+        {
+            _minimized = true;
+            ApplyOverlaySize();
+            Invalidate();
+            return;
+        }
         if (_weeklyButton.Contains(e.Location))
         {
             _showWeekly = !_showWeekly;
-            Height = CardHeight();
+            ApplyOverlaySize();
             Invalidate();
             return;
         }
@@ -283,13 +305,14 @@ internal sealed class OverlayForm : Form
             return;
         }
 
-        DrawOverlayCard(g);
+        if (_minimized) DrawPill(g);
+        else DrawOverlayCard(g);
     }
 
     private void DrawOverlayCard(Graphics g)
     {
         var theme = _themes[_themeIndex];
-        if (Height != CardHeight()) Height = CardHeight();
+        if (Height != OverlayHeight()) ApplyOverlaySize();
         var rect = new RectangleF(0.5f, 0.5f, ClientSize.Width - 1, ClientSize.Height - 1);
         using (var path = RoundedRect(rect, 18f))
         using (var fill = new LinearGradientBrush(rect, theme.CardTop, theme.CardBottom, LinearGradientMode.Vertical))
@@ -328,10 +351,12 @@ internal sealed class OverlayForm : Form
             Color.FromArgb(45, 212, 191),
             _stats.Codex.ShortUsedPercent,
             "5-HR WINDOW",
-            FormatRemaining(_stats.Codex.ShortReset),
+            string.Format(CultureInfo.InvariantCulture, "{0} reset", FormatRemaining(_stats.Codex.ShortReset)),
             _stats.Codex.WeekUsedPercent,
             "WEEKLY",
-            FormatRemaining(_stats.Codex.WeekReset));
+            string.Format(CultureInfo.InvariantCulture, "{0} reset", FormatRemaining(_stats.Codex.WeekReset)),
+            string.Format(CultureInfo.InvariantCulture, "{0} tokens", FormatCompact(_stats.Codex.HourTokens)),
+            string.Format(CultureInfo.InvariantCulture, "{0} tokens", FormatCompact(_stats.Codex.WeekTokens)));
 
         using (var line = new Pen(theme.Divider, 1f))
             g.DrawLine(line, 14, y, ClientSize.Width - 14, y);
@@ -344,12 +369,14 @@ internal sealed class OverlayForm : Form
             "Anthropic",
             "C",
             Color.FromArgb(224, 138, 95),
-            TokenPercent(_stats.Claude.HourTokens, 200000),
-            "1-HR LOCAL",
+            null,
+            "1-HR TOKENS",
             FormatCompact(_stats.Claude.HourTokens),
-            TokenPercent(_stats.Claude.WeekTokens, 1000000),
-            "WEEKLY LOCAL",
-            FormatCompact(_stats.Claude.WeekTokens));
+            null,
+            "WEEKLY TOKENS",
+            FormatCompact(_stats.Claude.WeekTokens),
+            "local log total",
+            "local log total");
 
         DrawFooter(g, theme, y);
     }
@@ -375,7 +402,8 @@ internal sealed class OverlayForm : Form
                 g.DrawString("LIVE", liveFont, muted, 136, 18);
         }
 
-        DrawThemeButton(g, theme, ClientSize.Width - 36, 11);
+        DrawThemeButton(g, theme, ClientSize.Width - 64, 11);
+        DrawMinimizeButton(g, theme, ClientSize.Width - 36, 11);
     }
 
     private float DrawToolBlock(
@@ -391,7 +419,9 @@ internal sealed class OverlayForm : Form
         string primaryRight,
         double? weeklyUsed,
         string weeklyLabel,
-        string weeklyRight)
+        string weeklyRight,
+        string primaryDetail,
+        string weeklyDetail)
     {
         y += 11;
         DrawBadge(g, theme, 14, y, letter, tint);
@@ -408,7 +438,7 @@ internal sealed class OverlayForm : Form
         DrawStatus(g, theme, ClientSize.Width - 14, y + 15, primaryUsed);
 
         y += 46;
-        DrawMeter(g, theme, 14, y, ClientSize.Width - 28, primaryLabel, primaryUsed, primaryRight, tint);
+        DrawMeter(g, theme, 14, y, ClientSize.Width - 28, primaryLabel, primaryUsed, primaryRight, primaryDetail, tint);
         y += 46;
 
         if (_showWeekly)
@@ -421,14 +451,14 @@ internal sealed class OverlayForm : Form
                 g.DrawLine(line, 63, y + 9, ClientSize.Width - 14, y + 9);
             }
             y += 22;
-            DrawMeter(g, theme, 14, y, ClientSize.Width - 28, weeklyLabel, weeklyUsed, weeklyRight, tint);
+            DrawMeter(g, theme, 14, y, ClientSize.Width - 28, weeklyLabel, weeklyUsed, weeklyRight, weeklyDetail, tint);
             y += 46;
         }
 
         return y + 10;
     }
 
-    private static void DrawMeter(Graphics g, OverlayTheme theme, float x, float y, float w, string label, double? used, string right, Color tint)
+    private static void DrawMeter(Graphics g, OverlayTheme theme, float x, float y, float w, string label, double? used, string right, string detail, Color tint)
     {
         using (var pctFont = new Font(theme.MonoFont, 17f, FontStyle.Bold, GraphicsUnit.Pixel))
         using (var pctSmall = new Font(theme.MonoFont, 10f, FontStyle.Bold, GraphicsUnit.Pixel))
@@ -438,13 +468,18 @@ internal sealed class OverlayForm : Form
         using (var muted = new SolidBrush(theme.Muted))
         using (var accent = new SolidBrush(theme.Accent))
         {
-            var pctText = used.HasValue ? ((int)Math.Round(used.Value)).ToString(CultureInfo.InvariantCulture) : "--";
-            g.DrawString(pctText, pctFont, text, x, y);
-            var pctWidth = g.MeasureString(pctText, pctFont).Width;
-            if (used.HasValue) g.DrawString("%", pctSmall, muted, x + pctWidth - 1, y + 7);
-            g.DrawString(label, labelFont, muted, x + pctWidth + 17, y + 6);
+            var valueText = used.HasValue ? ((int)Math.Round(used.Value)).ToString(CultureInfo.InvariantCulture) : right;
+            g.DrawString(valueText, pctFont, text, x, y);
+            var valueWidth = g.MeasureString(valueText, pctFont).Width;
+            if (used.HasValue) g.DrawString("%", pctSmall, muted, x + valueWidth - 1, y + 7);
+            g.DrawString(label, labelFont, muted, x + valueWidth + (used.HasValue ? 17 : 10), y + 6);
             var rs = g.MeasureString(right, rightFont);
-            g.DrawString(right, rightFont, accent, x + w - rs.Width, y + 5);
+            if (used.HasValue) g.DrawString(right, rightFont, accent, x + w - rs.Width, y + 5);
+            else
+            {
+                var detailSize = g.MeasureString(detail, labelFont);
+                g.DrawString(detail, labelFont, muted, x + w - detailSize.Width, y + 7);
+            }
         }
 
         DrawProgressBar(g, theme, new RectangleF(x, y + 27, w, 8), used, tint);
@@ -469,6 +504,21 @@ internal sealed class OverlayForm : Form
             g.FillEllipse(brush, x + 11, y + 7, 2, 2);
             g.FillEllipse(brush, x + 14, y + 10, 2, 2);
         }
+    }
+
+    private void DrawMinimizeButton(Graphics g, OverlayTheme theme, float x, float y)
+    {
+        _minimizeButton = new RectangleF(x, y, 24, 22);
+        using (var path = RoundedRect(_minimizeButton, 7f))
+        using (var fill = new SolidBrush(theme.ButtonFill))
+        using (var border = new Pen(theme.Border, 1f))
+        {
+            g.FillPath(fill, path);
+            g.DrawPath(border, path);
+        }
+
+        using (var pen = new Pen(theme.Muted, 1.7f))
+            g.DrawLine(pen, x + 6, y + 12, x + 18, y + 12);
     }
 
     private static void DrawBadge(Graphics g, OverlayTheme theme, float x, float y, string letter, Color tint)
@@ -558,9 +608,78 @@ internal sealed class OverlayForm : Form
         }
     }
 
-    private int CardHeight()
+    private void DrawPill(Graphics g)
     {
-        return _showWeekly ? 394 : 274;
+        var theme = _themes[_themeIndex];
+        var rect = new RectangleF(0.5f, 0.5f, ClientSize.Width - 1, ClientSize.Height - 1);
+        _pillButton = rect;
+        using (var path = RoundedRect(rect, 18f))
+        using (var fill = new LinearGradientBrush(rect, theme.CardTop, theme.CardBottom, LinearGradientMode.Vertical))
+        using (var border = new Pen(theme.Border, 1f))
+        {
+            g.FillPath(fill, path);
+            g.DrawPath(border, path);
+        }
+
+        if (theme.TopAccentLine)
+        {
+            using (var accent = new Pen(theme.Accent, 2f))
+                g.DrawLine(accent, 18, 2, ClientSize.Width - 18, 2);
+        }
+
+        DrawMiniRing(g, theme, 13, 13, _stats.Codex.ShortUsedPercent, Color.FromArgb(45, 212, 191));
+        DrawMiniRing(g, theme, 58, 13, null, Color.FromArgb(224, 138, 95));
+
+        using (var labelFont = new Font("Segoe UI", 9f, FontStyle.Bold, GraphicsUnit.Pixel))
+        using (var valueFont = new Font(theme.MonoFont, 14f, FontStyle.Regular, GraphicsUnit.Pixel))
+        using (var muted = new SolidBrush(theme.Muted))
+        using (var accent = new SolidBrush(theme.Accent))
+        {
+            g.DrawString("CODEX 5H RESET", labelFont, muted, 112, 14);
+            g.DrawString(FormatRemaining(_stats.Codex.ShortReset), valueFont, accent, 112, 28);
+        }
+    }
+
+    private static void DrawMiniRing(Graphics g, OverlayTheme theme, float x, float y, double? used, Color tint)
+    {
+        var rect = new RectangleF(x + 2, y + 2, 34, 34);
+        using (var track = new Pen(theme.Track, 4f))
+            g.DrawArc(track, rect, 0, 360);
+        if (used.HasValue)
+        {
+            using (var fill = new Pen(used.Value >= 90 ? theme.Critical : used.Value >= 70 ? theme.Warning : tint, 4f))
+                g.DrawArc(fill, rect, -90, (float)(360.0 * Math.Max(0, Math.Min(100, used.Value)) / 100.0));
+        }
+        using (var font = new Font(theme.MonoFont, 10f, FontStyle.Bold, GraphicsUnit.Pixel))
+        using (var brush = new SolidBrush(used.HasValue ? tint : theme.Muted))
+        using (var sf = Centered())
+            g.DrawString(used.HasValue ? ((int)Math.Round(used.Value)).ToString(CultureInfo.InvariantCulture) : "C", font, brush, new RectangleF(x, y, 38, 38), sf);
+    }
+
+    private int OverlayHeight()
+    {
+        return _minimized ? 64 : (_showWeekly ? 394 : 274);
+    }
+
+    private int OverlayWidth()
+    {
+        return _minimized ? 284 : 344;
+    }
+
+    private void ApplyOverlaySize()
+    {
+        var right = Right;
+        Width = OverlayWidth();
+        Height = OverlayHeight();
+        Left = right - Width;
+        ApplyShape();
+    }
+
+    private void ApplyShape()
+    {
+        var radius = _minimized ? 18f : 18f;
+        using (var path = RoundedRect(new RectangleF(0, 0, ClientSize.Width, ClientSize.Height), radius))
+            Region = new Region(path);
     }
 
     private void DrawFooter(Graphics g, OverlayTheme theme, float y)
