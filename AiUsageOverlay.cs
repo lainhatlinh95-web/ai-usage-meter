@@ -688,29 +688,29 @@ internal sealed class OverlayForm : Form
                 g.DrawLine(accent, 18, 2, ClientSize.Width - 18, 2);
         }
 
-        DrawMiniRing(g, theme, 13, 13, _stats.Codex.ShortUsedPercent, Color.FromArgb(45, 212, 191));
-        DrawMiniRing(g, theme, 58, 13, null, Color.FromArgb(224, 138, 95));
+        DrawMiniRing(g, theme, 13, 13, RemainingPercent(_stats.Codex.ShortUsedPercent), _stats.Codex.ShortUsedPercent, Color.FromArgb(45, 212, 191));
 
         using (var labelFont = new Font("Segoe UI", 7f, FontStyle.Bold))
-        using (var valueFont = new Font(theme.MonoFont, 10.5f, FontStyle.Regular))
+        using (var valueFont = new Font("Segoe UI", 8.4f, FontStyle.Bold))
         {
-            DrawText(g, "CODEX 5H RESET", labelFont, theme.Muted, 112, 14);
-            DrawText(g, FormatRemaining(_stats.Codex.ShortReset), valueFont, theme.Accent, 112, 28);
+            DrawText(g, "CODEX 5-HR LEFT", labelFont, theme.Muted, 58, 13);
+            DrawText(g, FormatResetLabel(_stats.Codex.ShortReset), valueFont, theme.Accent, new RectangleF(58, 28, ClientSize.Width - 72, 18), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
     }
 
-    private static void DrawMiniRing(Graphics g, OverlayTheme theme, float x, float y, double? used, Color tint)
+    private static void DrawMiniRing(Graphics g, OverlayTheme theme, float x, float y, double? displayPercent, double? statusUsed, Color tint)
     {
         var rect = new RectangleF(x + 2, y + 2, 34, 34);
         using (var track = new Pen(theme.Track, 4f))
             g.DrawArc(track, rect, 0, 360);
-        if (used.HasValue)
+        if (displayPercent.HasValue)
         {
-            using (var fill = new Pen(used.Value >= 90 ? theme.Critical : used.Value >= 70 ? theme.Warning : tint, 4f))
-                g.DrawArc(fill, rect, -90, (float)(360.0 * Math.Max(0, Math.Min(100, used.Value)) / 100.0));
+            var used = statusUsed.HasValue ? statusUsed.Value : 0;
+            using (var fill = new Pen(used >= 90 ? theme.Critical : used >= 70 ? theme.Warning : tint, 4f))
+                g.DrawArc(fill, rect, -90, (float)(360.0 * Math.Max(0, Math.Min(100, displayPercent.Value)) / 100.0));
         }
         using (var font = new Font(theme.MonoFont, 7.5f, FontStyle.Bold))
-            DrawText(g, used.HasValue ? ((int)Math.Round(used.Value)).ToString(CultureInfo.InvariantCulture) : "C", font, used.HasValue ? tint : theme.Muted, new RectangleF(x, y, 38, 38), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            DrawText(g, displayPercent.HasValue ? ((int)Math.Round(displayPercent.Value)).ToString(CultureInfo.InvariantCulture) : "--", font, displayPercent.HasValue ? tint : theme.Muted, new RectangleF(x, y, 38, 38), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
     }
 
     private int OverlayHeight()
@@ -721,7 +721,7 @@ internal sealed class OverlayForm : Form
 
     private int OverlayWidth()
     {
-        return _minimized ? 284 : 344;
+        return _minimized ? 252 : 344;
     }
 
     private void ApplyOverlaySize()
